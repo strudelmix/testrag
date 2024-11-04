@@ -13,12 +13,12 @@ def getcharsets(msg):
 
 
 # def handleerror(errmsg, emailmsg, cs):
-    # print()
-    # print(errmsg)
-    # print("This error occurred while decoding with ", cs, " charset.")
-    # print("These charsets were found in the one email.", getcharsets(emailmsg))
-    #print("This is the subject:", emailmsg['subject'])
-    #p rint("This is the sender:", emailmsg['From'])
+# print()
+# print(errmsg)
+# print("This error occurred while decoding with ", cs, " charset.")
+# print("These charsets were found in the one email.", getcharsets(emailmsg))
+# print("This is the subject:", emailmsg['subject'])
+# p rint("This is the sender:", emailmsg['From'])
 
 
 def get_message_body(msg):
@@ -56,13 +56,18 @@ def parse_box(mbox_file):
     emails = {}
     for message in mbox:
         recipient = ""
+        recipient_dict = {}
 
-        if "akang@ecornell.com" or "ak16@cornell.edu" in message['From']:
+        print(type(message['To']))
+
+        if any(item in message['From'] for item in ["akang@ecornell.com", "ak16@cornell.edu"]):
             recipient = message['To']
+            recipient_dict.update({'to_or_from': 'to', 'recipient_name': recipient})
             print(recipient)
 
-        elif "akang@ecornell.com" or "ak16@cornell.edu" in message['To']:
+        else:
             recipient = message['From']
+            recipient_dict.update({'to_or_from': 'from', 'recipient_name': recipient})
             print(recipient)
 
         # if recipient is None, skip.
@@ -74,7 +79,6 @@ def parse_box(mbox_file):
         DISREGARD_ADDR = ["@ecornell.com", "@cornell.edu", "groups.cornell.edu", "undisclosed-recipients:;"]
         for addr in DISREGARD_ADDR:
             if addr in recipient:
-
                 print("recipient is colleague or helpdesk. looping the next element of the for loop.")
                 continue
 
@@ -82,6 +86,7 @@ def parse_box(mbox_file):
             recipient = recipient.split(" via Canvas Notifications")[0]
             print("recipient processed.")
             print(recipient)
+            recipient_dict['recipient_name'] = recipient
             print("\n")
 
         # message['Date'] = Thu, 11 Sep 2024 17:27:30 +0000
@@ -97,7 +102,8 @@ def parse_box(mbox_file):
             print("subject is none. Escaping the if else loop.")
             pass
         # if subject line starts with "Re: " then remove it
-        elif message['Subject'].lower().startswith('re:'): # or message['Subject'].startswith('RE:') or message['Subject'].startswith('re:'):
+        elif message['Subject'].lower().startswith(
+                're:'):  # or message['Subject'].startswith('RE:') or message['Subject'].startswith('re:'):
             new_subject = re.sub("Re:", "", message['Subject'], flags=re.IGNORECASE)
             # remove leading and trailing whitespaces. (Some subject lines are just "re:" with no space. so removing
             # leading/trailing spaces needs to be a separate event.
@@ -145,13 +151,13 @@ def parse_box(mbox_file):
         body = get_message_body(message)
         if body != "null":
             if new_subject not in emails:
-                emails[new_subject] = [{'from': message['From'], 'to': message['To'], 'date': date_obj, 'body': body}]
+                emails[new_subject] = [{'from': message['From'], 'to': message['To'], 'date': date_obj, 'body': body, 'recipient_dict': recipient_dict}]
             elif new_subject in emails:
                 # find duplicates
                 if not any(d['body'] == body for d in emails[new_subject]):
                     # this is a list of dictionaries
                     new_list = emails[new_subject]
-                    new_list.append({'from': message['From'], 'to': message['To'], 'date': date_obj, 'body': body})
+                    new_list.append({'from': message['From'], 'to': message['To'], 'date': date_obj, 'body': body, 'recipient_dict': recipient_dict})
                     emails[new_subject] = new_list
                 elif any(d['body'] == body for d in emails[new_subject]):
                     pass
@@ -184,14 +190,18 @@ def parse_box(mbox_file):
         # now remove seconds and timezone, because quoted replies in email don't have that data.
         # timezone/seconds was only to make sure to sort the emails in order.
         # ** allows arbitrary number of d dicts, then it iterates over all those and replaces the current date values
-        group_email_list = [{**d, 'date': d['date'].replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")} for d in group_email_list]
+        group_email_list = [{**d, 'date': d['date'].replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")} for d in
+                            group_email_list]
         print("filtering datetime objects in date keys")
 
         reply_dates_list = []
         for email_info_dict in group_email_list:
             print("opening dictionary of emails that have the same subject line.")
+            print(email_info_dict)
+
             if email_info_dict['date'] not in reply_dates_list:
-                print("this email has not yet been processed/is a new email thread, as there it shares no same date as another email. Processing:")
+                print("this email has not yet been processed/is a new email thread, as there it shares no same date "
+                      "as another email. Processing:")
                 print("\n")
                 # we need to remove all the names from the emails.
                 # first two elements are name of sender
@@ -201,18 +211,32 @@ def parse_box(mbox_file):
 
                 hibye_list = ["hi", "hello",
                               "thanks", "regards", "my best",
-                              "abe", "abraham", "kang", "--shellie",
-                              "--", "prof", "professor", "sir",
-                              " , "]
+                              "abe", "abraham", "kang",
+                              "mr", "prof", "professor", "sir"]
+
+                print(email_info_dict['recipient_dict'])
+                email_info_dict['recipient_dict']['recipient_name']
+                ls_recipient = email_info_dict['recipient_dict']['recipient_name'].split()
+                print(ls_recipient)
+                hibye_list.extend(ls_recipient)
+
+                hibye_list = [rf"\b{_}\b" for _ in hibye_list]
+                hibye_list.extend([r"--\b", r"(\n+|\s+)(\.|,)", r"^(\n*|\s*)(,|\.)"])
+
+                # greet_pattern = re.compile("|".join(new_hibye_list), re.IGNORECASE)
+                # no_greet_body = greet_pattern.sub('', body)
+                # print(no_greet_body)
+
+                # above doesn't work. since it does it concurrently, it doesnt delete the " . " that's left
+                # after removing "mr". so i have to do it in a loop. so i do that below.
 
                 for _ in hibye_list:
                     # find and remove the greeting or sign off
-                    body = re.sub("\b" + _ + "\b", '', body, flags=re.IGNORECASE)
+                    print(f"filtering for {_}")
+
+                    body = re.sub(_, '', body, flags=re.IGNORECASE)
                 print(body)
-                exit()
-                ls_recipient = list(recipient)
-                for name in ls_recipient:
-                    body = body.replace(name, "")
+
                 print("email body is removed of greetings and names")
 
                 # look for the same subject line in the subject line list
@@ -233,9 +257,9 @@ def parse_box(mbox_file):
 
                 reply_matches = re.finditer(reply_date_pattern, body)
                 print("got this far")
-                print(body)
 
-                if reply_matches:
+                match_group = [match.group() for match in reply_matches]
+                if match_group:
                     print("quoted email history found in email. Processing:")
                     print(reply_matches)
 
@@ -286,8 +310,9 @@ def parse_box(mbox_file):
                     exit()
 
                 # it doesn't have replies, ie it's just one message
-                elif not reply_matches:
+                elif not match_group:
                     # not worth trying to figure it out lmao
+                    print("no reply matches found")
                     pass
 
                 # find index
