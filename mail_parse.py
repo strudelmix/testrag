@@ -238,7 +238,7 @@ def parse_box(mbox_file):
                     # concatenate second to last element + suffix
                     # so when removing the suffix it won't remove things like
                     # "Part III" to "Part " in the email
-                    ls_recipient[len(ls_recipient)-2] = ' '.join(ls_recipient[len(ls_recipient) - 2], ls_recipient[-1])
+                    ls_recipient[len(ls_recipient)-2] = ls_recipient[len(ls_recipient) - 2] + " " + ls_recipient[-1]
                 print(ls_recipient)
                 hibye_list.extend(ls_recipient)
 
