@@ -51,43 +51,47 @@ def get_message_body(msg):
 
 def parse_box(mbox_file):
     mbox = mailbox.mbox(mbox_file)
-
-    # key = subject, value = list of dicts containing emails that has that subject line
     emails = {}
+    prof_email = ["akang@ecornell.com", "ak16@cornell.edu"]
+    # key = subject, value = list of dicts containing emails that has that subject line
     for message in mbox:
-        recipient = ""
-        recipient_dict = {}
-
-        print(type(message['To']))
-
-        if any(item in message['From'] for item in ["akang@ecornell.com", "ak16@cornell.edu"]):
-            recipient = message['To']
-            recipient_dict.update({'to_or_from': 'to', 'recipient_name': recipient})
-            print(recipient)
-
+        if any(item in message['From'] for item in prof_email):
+            recipient = 'To'
+            email_dict = {'From': 'Professor'}
         else:
-            recipient = message['From']
-            recipient_dict.update({'to_or_from': 'from', 'recipient_name': recipient})
-            print(recipient)
+            recipient = 'From'
+            email_dict = {'To': 'Professor'}
+
+        recipient_name = message.get_all(recipient, [])
+        recipient_name = recipient_name.extend(message.get_all('CC', []))
 
         # if recipient is None, skip.
-        if recipient is None:
+        if recipient_name is None:
             print("no recipient found. Skipping...")
             continue
+        elif type(recipient_name) is list:
+            if len(recipient_name) > 1:
+                print("group email. skipping")
+                continue
+            elif len(recipient_name) == 1:
+                recipient_name = str(recipient_name)
+
         print("recipient found.")
         # if the person Abraham is talking to is colleagues or helpdesk or multiple people, disregard email
-        DISREGARD_ADDR = ["@ecornell.com", "@cornell.edu", "groups.cornell.edu", "undisclosed-recipients:;"]
-        for addr in DISREGARD_ADDR:
-            if addr in recipient:
-                print("recipient is colleague or helpdesk. looping the next element of the for loop.")
-                continue
+        DISREGARD_ADDR = ["@ecornell.com", "@cornell.edu", "groups.cornell.edu", "undisclosed-recipient:;"]
+        if any(item in recipient_name for item in DISREGARD_ADDR):
+            print("recipient is colleague or helpdesk. looping the next element of the for loop.")
+            continue
 
-        if " via Canvas Notifications" in recipient:
-            recipient = recipient.split(" via Canvas Notifications")[0]
-            print("recipient processed.")
-            print(recipient)
-            recipient_dict['recipient_name'] = recipient
-            print("\n")
+        recipient_trailing = [" via ", " ("]
+        for trailing in recipient_trailing:
+            if trailing in recipient_name:
+                recipient_name = recipient_name.split(trailing)[0]
+
+        print("recipient processed.")
+        print(recipient_name)
+        email_dict.update({recipient: recipient_name})
+        print("\n")
 
         # message['Date'] = Thu, 11 Sep 2024 17:27:30 +0000
         # [5:-9] changes it to 11 Sep 2024 17:27
@@ -108,7 +112,7 @@ def parse_box(mbox_file):
             # remove leading and trailing whitespaces. (Some subject lines are just "re:" with no space. so removing
             # leading/trailing spaces needs to be a separate event.
             new_subject = new_subject.strip()
-            print("subject line starts with Re:. remomving...")
+            print("subject line starts with Re:. removing...")
 
             # check if subject is empty or only has whitespace. because there's
             # some subject lines that are literally just "Re: ".
@@ -136,30 +140,39 @@ def parse_box(mbox_file):
 
         # subject is blank, has white spaces, or is just called 'Re:'
         if setEmpty:
-            new_subject = recipient + " with No Subject"
+            new_subject = recipient_name + " with No Subject"
         elif not setEmpty:
             new_subject = new_subject.replace("\n", "")
             if " just sent you a message" in new_subject:
                 new_subject = new_subject.split(" just sent you a message")[0]
         print(f'new subject line is: ' + new_subject)
-        match_date_str = re.search(r'\d{1,2}\s[A-Za-z]{3}\s\d{4}\s\d{2}:\d{2}:\d{2}\s(\+|-)\d{4}', message['Date'])
+        match_date_str = re.search(r'\d{1,2}\s[A-Za-z]{3}\s\d{4}\s\d{2}:\d{2}:\d{2}\s[+-]\d{4}', message['Date'])
         date_format = '%d %b %Y %H:%M:%S %z'
         date_obj = datetime.strptime(match_date_str.group(), date_format)
+        email_dict.update({'Date': date_obj})
 
         # find all the emails' subject lines and dates. we want to order all emails with the same subject by date.
         # find if subject already exists, and if so, add to existing list
         body = get_message_body(message)
         if body != "null":
+            if any(item in body for item in ["---------- Forwarded message ---------", "--------------- Original Message -------------"]):
+                print("email is a forwarded message. skipping...")
+                continue
+            elif any(item in body for item in DISREGARD_ADDR):
+                print("email indicates some messages are from or directed to a colleague/helpdesk. Skipping...")
+                continue
+
+            email_dict.update({'Body': body})
             if new_subject not in emails:
-                emails[new_subject] = [{'from': message['From'], 'to': message['To'], 'date': date_obj, 'body': body, 'recipient_dict': recipient_dict}]
+                emails[new_subject] = [email_dict]
             elif new_subject in emails:
                 # find duplicates
-                if not any(d['body'] == body for d in emails[new_subject]):
+                if not any(d['Body'] == body for d in emails[new_subject]):
                     # this is a list of dictionaries
                     new_list = emails[new_subject]
-                    new_list.append({'from': message['From'], 'to': message['To'], 'date': date_obj, 'body': body, 'recipient_dict': recipient_dict})
+                    new_list.append(email_dict)
                     emails[new_subject] = new_list
-                elif any(d['body'] == body for d in emails[new_subject]):
+                elif any(d['Body'] == body for d in emails[new_subject]):
                     pass
 
         elif body == "null":
@@ -190,8 +203,7 @@ def parse_box(mbox_file):
         # now remove seconds and timezone, because quoted replies in email don't have that data.
         # timezone/seconds was only to make sure to sort the emails in order.
         # ** allows arbitrary number of d dicts, then it iterates over all those and replaces the current date values
-        group_email_list = [{**d, 'date': d['date'].replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")} for d in
-                            group_email_list]
+        # group_email_list = [{**d, 'date': d['Date'].replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")} for d in group_email_list]
         print("filtering datetime objects in date keys")
 
         reply_dates_list = []
@@ -199,7 +211,7 @@ def parse_box(mbox_file):
             print("opening dictionary of emails that have the same subject line.")
             print(email_info_dict)
 
-            if email_info_dict['date'] not in reply_dates_list:
+            if email_info_dict['Date'] not in reply_dates_list:
                 print("this email has not yet been processed/is a new email thread, as there it shares no same date "
                       "as another email. Processing:")
                 print("\n")
@@ -207,16 +219,26 @@ def parse_box(mbox_file):
                 # first two elements are name of sender
 
                 # retrieve body
-                body = email_info_dict['body']
+                body = email_info_dict['Body']
 
                 hibye_list = ["hi", "hello",
                               "thanks", "regards", "my best",
+                              "best", "dear",
                               "abe", "abraham", "kang",
-                              "mr", "prof", "professor", "sir"]
+                              "mr", "prof", "professor", "sir",
+                              "akang@ecornell.com", "ak16@cornell.edu"]
 
-                print(email_info_dict['recipient_dict'])
-                email_info_dict['recipient_dict']['recipient_name']
-                ls_recipient = email_info_dict['recipient_dict']['recipient_name'].split()
+                if email_info_dict['From'] == 'Professor':
+                    ls_recipient = email_info_dict['To'].split()
+                else:
+                    ls_recipient = email_info_dict['From'].split()
+
+                suffix = ["I", "II", "III", "IV", "Jr.", "Sr."]
+                if any(item in ls_recipient[-1] for item in suffix):
+                    # concatenate second to last element + suffix
+                    # so when removing the suffix it won't remove things like
+                    # "Part III" to "Part " in the email
+                    ls_recipient[len(ls_recipient)-2] = ' '.join(ls_recipient[len(ls_recipient) - 2], ls_recipient[-1])   
                 print(ls_recipient)
                 hibye_list.extend(ls_recipient)
 
@@ -250,70 +272,119 @@ def parse_box(mbox_file):
                 # turn all multi-spaces into 1 space and remove trailing spaces.
                 # ' '.join(body.split())
 
+                # both patterns exist in mbox file (most likely some kind of external email quote or that the mbox format
+                # was updated at some point
                 # On Sun, Jan 3, 2021 at 5:44 PM [prev sender's name] <notifications@instructure.com>\nwrote:
-                # look for specifically Jan 3, 2021 at 5:44 PM
-                reply_date_pattern = r"[A-Za-z]{3} \d{1,2}, \d{4}, at \d{1,2}:\d{2} (AM|PM)"
+                # On Sun, Jan 3, 2021, 5:44 PM [prev sender's name] <notifications@instructure.com>\nwrote:
+                # .*? (question mark important, otherwise it will match everything starting from "On x date" and on
+                # ?s meaning line breaks like \n is also included
+                reply_date_pattern = r"On [A-Za-z]{3}, [A-Za-z]{3} \d{1,2}, \d{4}\s*(at|,) \d{1,2}:\d{2} (AM|PM)(?s).*?wrote:"
                 # returns list of all the indices it finds that pattern in the body, aka the quoted prev emails
 
                 reply_matches = re.finditer(reply_date_pattern, body)
                 print("got this far")
 
                 match_group = [match.group() for match in reply_matches]
-                if match_group:
+
+                # it doesn't have replies, ie it's just one message
+                if not match_group:
+                    # not worth trying to figure it out lmao
+                    print("no reply matches found")
+                    pass
+
+                elif match_group:
+                    counter = 0
+
                     print("quoted email history found in email. Processing:")
-                    print(reply_matches)
+                    print(match_group)
 
                     email_chain = []
-                    one_email = ""
-                    counter = 0
-                    # outputs all the matches
-                    reply_date_format = '%b %d, %Y at %I:%M %p'
-                    for match in reply_matches:
-                        print("Match found:", match.group())
-                        print("Start index:", match.start())
-                        print("End index:", match.end())
-                        print("Span:", match.span())
+                    beginning_email = ""
+                    email_header = ""
+                    # beginning_deletions = [r"show quoted text (?s).*>"]
+                    while counter <= len(match_group):
+                        one_email = body
+                        if counter < len(match_group):
+                            if " at " in match_group[counter]:
+                                reply_date_format = 'On %a, %b %d, %Y at %I:%M %p'
+                            else:
+                                reply_date_format = 'On %a, %b %d, %Y, %I:%M %p'
+                            # this matches anything after AM or PM (? <=[AM | PM]). *
+                            # but instead, i match up to AM and PM, then with r'1' i include the AM/PM from
+                            # the capture group to be included in the new string
+                            # match anything after AM or PM
+                            match_group_dt_format = re.sub(r"(?<=AM|PM)(?s).*", '', match_group[counter])
+                            reply_obj = datetime.strptime(match_group_dt_format, reply_date_format)
+                            # so that while iterating through the for loop, if i come across emails that have these exact dates,
+                            # i don't process them again. and since i already sorted the list of emails based on the most recent
+                            # dates, i'll be processing the ones that are the most recent first.
+                            reply_dates_list.append(reply_obj)
 
-                        one_email = body[:match.start() - 1]
-                        body = body[match.start():]
+                            index = body.find(match_group[counter])
+                            end_index = -1
+                            if index != -1:
+                                end_index = index + len(match_group[counter])
+                            print("Match found: ", match_group[counter])
+                            print("Start index: ", index)
+                            print("End index: ", end_index)
 
-                        print(f"\n\nONE EMAIL:\n{one_email}\n\n")
-                        print(f"\n\nREST OF BODY WITHOUT ONE EMAIL:\n{body}\n\n")
+                            one_email = body[:index - 1]
+                            body = body[end_index + 1:]
 
-                        reply_obj = datetime.strptime(match.group(), reply_date_format)
-                        reply_dates_list.append(reply_obj)
+                            if counter == 0:
+                                # means it is still at the most top/recent email, before the quote history.
+                                if email_info_dict['From'] == 'Professor':
+                                    email_header = email_info_dict['From']
+                                else:
+                                    email_header = 'Student'
+                            # otherwise, find who wrote the email based on the reply_matches.
+                            else:
+                                email_header = re.search(r"(?<=AM|PM)(?s).*(?=\s*<(?s).*?wrote:)", match_group[counter])
+                                print(email_header)
+                                exit()
+
+                        # i dont want to delete code that maybe is using the ">" expression, so im being specific
+                        quote_string = "\n" + ("> " * counter)
+
+                        # delete the longer > > sequence first so its less of a headache
+                        quote_search = re.search(r"show quoted text <(?s).*_>", one_email, re.IGNORECASE)
+                        if quote_search:
+                            print("found show quoted texted message in email. removing:")
+                            one_email = re.sub(r"show quoted text <(?s).*_>", '', one_email)
+                            print(one_email)
+                            # add one more > and then delete those
+                            extra_quote_string = quote_string + "> "
+                            if extra_quote_string in one_email:
+                                print("found extra >. removing")
+                                one_email.replace(extra_quote_string, "")
+                                print(one_email)
+
+                            if quote_string in one_email:
+                                print("found quoted text. removing")
+                                one_email.replace(quote_string, "")
+
+                            print("removed!")
+                            print(one_email)
+
+                            print(f"\n\nONE EMAIL:\n{one_email}\n\n")
+                            print(f"\n\nREST OF BODY WITHOUT ONE EMAIL:\n{body}\n\n")
+
+                        trailing_deletions = ["Sent from my", "[image: ", "You can reply to this message",
+                                              "The contents of this email are the property of PNC. If it was not "
+                                              "addressed to you, you have no legal right to read it."]
+                        # after the loop body has been removed down to the first email in the quoted reply history
+                        for one_trailing in trailing_deletions:
+                            if one_trailing in one_email:
+                                print("found trailing messages/links from Canvas to delete. Deleting...")
+                                one_email = one_email.split(one_trailing)[0]
+
+                        email_chain.append(one_email)
+                        counter += 1
 
                         # the very first quoted email sometimes have an automated part that says
                         # "You can reply to this message on blah blah" and so remove everything after that
 
-                        if counter != 0:
-                            print("remove '>' quotes from quoted previous email...")
-                            string_to_delete = ">" * counter
-                            string_to_delete = "\n" + string_to_delete + " "
-                            one_email.replace(string_to_delete, "")
-
-                        email_chain.append(one_email)
-                        counter = counter + 1
-                    trailing_deletions = ["Sent from my", "[image: ", "You can reply to this message",
-                                          "The contents of this email are the property of PNC. If it was not "
-                                          "addressed to you, you have no legal right to read it."]
-                    for one_trailing in trailing_deletions:
-                        if one_trailing in body:
-                            print("found trailing messages/links from Canvas to delete. Deleting...")
-                            one_email = one_email.split(one_trailing)[0]
-
-                    print("GOT TO THE EMAIL DIALOGUE")
                     dialogue_style_email_list.append(email_chain)
-                    for email in dialogue_style_email_list:
-                        print("\n----------\nDIVIDE BETWEEN EMAILS\n------------")
-                        print(email)
-                    exit()
-
-                # it doesn't have replies, ie it's just one message
-                elif not match_group:
-                    # not worth trying to figure it out lmao
-                    print("no reply matches found")
-                    pass
 
                 # find index
                 # there are no ">" for those emails
@@ -326,6 +397,11 @@ def parse_box(mbox_file):
                 pass
 
     for one_dialogue_chain in dialogue_style_email_list:
+        print("GOT TO THE EMAIL DIALOGUE")
+        for email in one_dialogue_chain:
+            print("\n----------\nDIVIDE BETWEEN EMAILS\n------------")
+            print(email)
+
         with open("sent_mail_2.json", "a") as outfile:
             json.dump(one_dialogue_chain, outfile, indent=4)
 
