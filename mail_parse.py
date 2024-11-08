@@ -57,40 +57,43 @@ def parse_box(mbox_file):
     for message in mbox:
         if any(item in message['From'] for item in prof_email):
             recipient = 'To'
-            email_dict = {'From': 'Professor'}
+            to_student = True
         else:
             recipient = 'From'
-            email_dict = {'To': 'Professor'}
+            to_student = False
 
-        recipient_name = message.get_all(recipient, [])
-        recipient_name = recipient_name.extend(message.get_all('CC', []))
+        email_dict = {'to_student': to_student}
+        recipient = message.get_all(recipient, [])
+
+        if to_student:
+            recipient = recipient.extend(message.get_all('CC', []))
 
         # if recipient is None, skip.
-        if recipient_name is None:
+        if recipient is None:
             print("no recipient found. Skipping...")
             continue
-        elif type(recipient_name) is list:
-            if len(recipient_name) > 1:
+        elif type(recipient) is list:
+            if len(recipient) > 1:
                 print("group email. skipping")
                 continue
-            elif len(recipient_name) == 1:
-                recipient_name = str(recipient_name)
+            elif len(recipient) == 1:
+                recipient = str(recipient)
 
         print("recipient found.")
         # if the person Abraham is talking to is colleagues or helpdesk or multiple people, disregard email
         DISREGARD_ADDR = ["@ecornell.com", "@cornell.edu", "groups.cornell.edu", "undisclosed-recipient:;"]
-        if any(item in recipient_name for item in DISREGARD_ADDR):
+        if any(item in recipient for item in DISREGARD_ADDR):
             print("recipient is colleague or helpdesk. looping the next element of the for loop.")
             continue
 
         recipient_trailing = [" via ", " ("]
         for trailing in recipient_trailing:
-            if trailing in recipient_name:
-                recipient_name = recipient_name.split(trailing)[0]
+            if trailing in recipient:
+                recipient = recipient.split(trailing)[0]
 
         print("recipient processed.")
-        print(recipient_name)
-        email_dict.update({recipient: recipient_name})
+        print(recipient)
+        email_dict.update({"recipient": recipient})
         print("\n")
 
         # message['Date'] = Thu, 11 Sep 2024 17:27:30 +0000
@@ -140,7 +143,7 @@ def parse_box(mbox_file):
 
         # subject is blank, has white spaces, or is just called 'Re:'
         if setEmpty:
-            new_subject = recipient_name + " with No Subject"
+            new_subject = recipient + " with No Subject"
         elif not setEmpty:
             new_subject = new_subject.replace("\n", "")
             if " just sent you a message" in new_subject:
@@ -197,7 +200,7 @@ def parse_box(mbox_file):
         # first sort emails by most recent
         # unique_group_email_list = unique_group_email_list.sorted(key=lambda x: x['date'])
 
-        group_email_list = sorted(group_email_list, key=lambda x: x['date'])
+        group_email_list = sorted(group_email_list, key=lambda x: x['Date'])
         print("sorting email list based on date")
 
         # now remove seconds and timezone, because quoted replies in email don't have that data.
@@ -228,17 +231,14 @@ def parse_box(mbox_file):
                               "mr", "prof", "professor", "sir",
                               "akang@ecornell.com", "ak16@cornell.edu"]
 
-                if email_info_dict['From'] == 'Professor':
-                    ls_recipient = email_info_dict['To'].split()
-                else:
-                    ls_recipient = email_info_dict['From'].split()
+                ls_recipient = email_info_dict['recipient'].split()
 
                 suffix = ["I", "II", "III", "IV", "Jr.", "Sr."]
                 if any(item in ls_recipient[-1] for item in suffix):
                     # concatenate second to last element + suffix
                     # so when removing the suffix it won't remove things like
                     # "Part III" to "Part " in the email
-                    ls_recipient[len(ls_recipient)-2] = ' '.join(ls_recipient[len(ls_recipient) - 2], ls_recipient[-1])   
+                    ls_recipient[len(ls_recipient)-2] = ' '.join(ls_recipient[len(ls_recipient) - 2], ls_recipient[-1])
                 print(ls_recipient)
                 hibye_list.extend(ls_recipient)
 
@@ -299,8 +299,6 @@ def parse_box(mbox_file):
                     print(match_group)
 
                     email_chain = []
-                    beginning_email = ""
-                    email_header = ""
                     # beginning_deletions = [r"show quoted text (?s).*>"]
                     while counter <= len(match_group):
                         one_email = body
@@ -331,17 +329,24 @@ def parse_box(mbox_file):
                             one_email = body[:index - 1]
                             body = body[end_index + 1:]
 
+                            # counter == 0 it is still at the most top/recent email, before the quote history.
+                            # for the most recent email, find who wrote it based on who sent it using to_student.
                             if counter == 0:
-                                # means it is still at the most top/recent email, before the quote history.
-                                if email_info_dict['From'] == 'Professor':
-                                    email_header = email_info_dict['From']
+                                # if to_student is True, it means email was sent from professor to student.
+                                if email_info_dict['to_student']:
+                                    email_header = 'Professor'
                                 else:
                                     email_header = 'Student'
-                            # otherwise, find who wrote the email based on the reply_matches.
+                            # otherwise find who wrote the email based on the reply_matches pattern, and extract the
+                            # name from that.
                             else:
-                                email_header = re.search(r"(?<=AM|PM)(?s).*(?=\s*<(?s).*?wrote:)", match_group[counter])
-                                print(email_header)
-                                exit()
+                                # why was i trying to find the regex match for the exact name???? i spent so much time for no reason
+                                # just check whether professor's name/email is in the match_group[counter]
+                                # email_header = re.search(r"(?<=AM|PM)(?s).*(?=\s*<(?s).*?wrote:)", match_group[counter])
+                                if any(item in match_group[counter] for item in prof_email):
+                                    email_header = 'Professor'
+                                else:
+                                    email_header = 'Student'
 
                         # i dont want to delete code that maybe is using the ">" expression, so im being specific
                         quote_string = "\n" + ("> " * counter)
@@ -364,10 +369,6 @@ def parse_box(mbox_file):
                                 one_email.replace(quote_string, "")
 
                             print("removed!")
-                            print(one_email)
-
-                            print(f"\n\nONE EMAIL:\n{one_email}\n\n")
-                            print(f"\n\nREST OF BODY WITHOUT ONE EMAIL:\n{body}\n\n")
 
                         trailing_deletions = ["Sent from my", "[image: ", "You can reply to this message",
                                               "The contents of this email are the property of PNC. If it was not "
@@ -377,6 +378,10 @@ def parse_box(mbox_file):
                             if one_trailing in one_email:
                                 print("found trailing messages/links from Canvas to delete. Deleting...")
                                 one_email = one_email.split(one_trailing)[0]
+
+                        one_email = f"{email_header}:\n{one_email}"
+                        print(f"\n\nONE EMAIL:\n{one_email}\n\n")
+                        print(f"\n\nREST OF BODY WITHOUT ONE EMAIL:\n{body}\n\n")
 
                         email_chain.append(one_email)
                         counter += 1
