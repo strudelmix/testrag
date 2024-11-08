@@ -77,7 +77,7 @@ def parse_box(mbox_file):
                 print("group email. skipping")
                 continue
             elif len(recipient) == 1:
-                recipient = str(recipient)
+                recipient = recipient[0]
 
         print("recipient found.")
         # if the person Abraham is talking to is colleagues or helpdesk or multiple people, disregard email
