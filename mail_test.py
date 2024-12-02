@@ -5,13 +5,14 @@ import quopri
 
 
 class EmailClass:
-    def __init__(self, date, msg_from, to, body, to_student, reply_date_pattern):
+    def __init__(self, date, msg_from, to, body, to_student, reply_date_pattern1, reply_date_pattern2):
         self.date = date
         self.msg_from = msg_from
         self.to = to
         self.body = body
         self.to_student = to_student
-        self.reply_date_pattern = reply_date_pattern
+        self.reply_date_pattern1 = reply_date_pattern1
+        self.reply_date_pattern2 = reply_date_pattern2
 
     def __str__(self):
         return f"example string representation of EmailClass is {self.date} ({self.age})"
@@ -45,16 +46,63 @@ class EmailClass:
             self.body = re.sub(r"show quoted text <(?s).*?_>", '', self.body)
         return self.body
 
-    def find_dates_of_replies(self):
+    """def find_dates_of_replies(self):
         reply_matches = re.finditer(self.reply_date_pattern, body, re.DOTALL)
         match_group = [match.group().encode('ascii', 'ignore').decode('utf-8') for match in reply_matches]
         return match_group
+    """
 
     def filter_for_reply_dates(self):
         notSentOrDate = True
         email_chain = []
         counter = 0
         nextIsFrom = {}
+
+        while re.match(self.reply_date_pattern1, body, re.DOTALL) or re.match(self.reply_date_pattern2, body, re.DOTALL):
+            if re.match(self.reply_date_pattern2, body, re.DOTALL):
+                notSentOrDate = False
+                match_escaped = re.escape(re.match(self.reply_date_pattern2, body, re.DOTALL).group)
+                complete_pattern = rf"\**From:.*>*\s*{match_escaped}.*>*\s*\*To:.*>*\s*\*Subject:.*just sent you a message in Canvas\."
+                print(complete_pattern)
+            else:
+                complete_pattern = re.escape(re.match(self.reply_date_pattern1, body, re.DOTALL).group)
+
+            complete_match_to_remove = re.search(complete_pattern, self.body, re.DOTALL)
+
+            print(complete_match_to_remove.group())
+            if complete_match_to_remove.group() is None:
+                print("ERROR")
+                exit()
+
+            complete_match_index = re.search(complete_pattern, self.body, re.DOTALL).start()
+            complete_match_end = re.search(complete_pattern, self.body, re.DOTALL).end()
+
+            print("Match found: ", complete_match_to_remove)
+            print("Start index: ", complete_match_index)
+            print("End index: ", complete_match_end)
+
+            one_email = self.body[:complete_match_index - 1]
+            print("one email is the email BEFORE the matched reply format")
+            self.body = self.body[complete_match_end + 1:]
+
+            # counter == 0 it is still at the most top/recent email, before the quote history.
+            # for the most recent email, find who wrote it based on who sent it using to_student.
+            if counter == 0:
+                # if to_student is True, it means email was sent from professor to student.
+                if email_info_dict['to_student']:
+                    email_header = 'Professor'
+                    name_sign_offs = ['Abe', 'Abraham', 'Kang']
+                else:
+                    email_header = 'Student'
+                    name_sign_offs = recipient.split()
+                    # in real parser, make sure to check for suffixes.
+
+            # otherwise find who wrote the email based on the reply_matches pattern, and extract the name
+            # from that. why was i trying to find the regex match for the exact name???? i spent so much
+            # time for no reason just check whether professor's name/email is in the match_group[counter]
+            # email_header = re.search(r"(?<=AM|PM)(?s).*(?=\s*<(?s).*?wrote:)", match_group[counter])
+
+
         # beginning_deletions = [r"show quoted text (?s).*>"]
         while counter < len(self.find_dates_of_replies()):
             match_escaped = re.escape(self.find_dates_of_replies()[counter])
@@ -189,10 +237,11 @@ body = "Ok.\n\nRegards,\nAbe\n\nOn Mon, Sep 16, 2019 at 5:18 AM Brian Kane <bkan
        "<https://lms.ecornell.com/profile/communication>\n>\n>\n>\n"
 
 to_student = True
-reply_date_pattern = r"On [A-Za-z]{3}, [A-Za-z]{3} \d{1,2}, \d{4},* (?:at)? \d{1,2}:\d{2} (?:AM|PM)(?s).*\s*(" \
-                     r"?s).*?\bwrote\b:|(\**(Date|Sent:)\** \b\w+\b, \b\w+\b\s\d{1,2},\s\d{4},*\s\d{1,2}:\d{2}\s(?:AM|PM))"
+reply_date_pattern1 = r"On [A-Za-z]{3}, [A-Za-z]{3} \d{1,2}, \d{4},* (?:at)? \d{1,2}:\d{2} (?:AM|PM)(?s).*\s*(" \
+                     r"?s).*?\bwrote\b:"
+reply_date_pattern2 = "\**(Date|Sent:)\** \b\w+\b, \b\w+\b\s\d{1,2},\s\d{4},*\s\d{1,2}:\d{2}\s(?:AM|PM)"
 
-example_object = EmailClass(date, msg_from, to, body, to_student, reply_date_pattern)
+example_object = EmailClass(date, msg_from, to, body, to_student, reply_date_pattern1, reply_date_pattern2)
 example_object.encode_decode_txt()
 
 date_obj = example_object.look_for_date_in_msg()
