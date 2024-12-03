@@ -5,14 +5,14 @@ import quopri
 
 
 class EmailClass:
-    def __init__(self, date, msg_from, to, body, to_student, reply_date_pattern1, reply_date_pattern2):
+    def __init__(self, date, msg_from, to, body, to_student, sentDatePattern, normalPattern):
         self.date = date
         self.msg_from = msg_from
         self.to = to
         self.body = body
         self.to_student = to_student
-        self.reply_date_pattern1 = reply_date_pattern1
-        self.reply_date_pattern2 = reply_date_pattern2
+        self.sentDatePattern = sentDatePattern
+        self.normalPattern = normalPattern
 
     def __str__(self):
         return f"example string representation of EmailClass is {self.date} ({self.age})"
@@ -39,14 +39,13 @@ class EmailClass:
         # delete all quote histroy patterns in all of the body.
 
         # \n(?:(?:>\s)*)
-        body = self.body
-        body = body.replace("\n> ", "\n")
-        body = body.replace("\n>", "\n")
+        self.body = self.body.replace("\n> ", "\n")
+        self.body = self.body.replace("\n>", "\n")
 
-        show_quoted_text_str = re.search(r"show quoted text <(?s:).*?_>", body, re.IGNORECASE)
+        show_quoted_text_str = re.search(r"show quoted text <(?s:).*?_>", self.body, re.IGNORECASE)
         if show_quoted_text_str:
-            body = re.sub(r"show quoted text <(?s:).*?_>", '', body)
-        return body
+            self.body = re.sub(r"show quoted text <(?s:).*?_>", '', self.body)
+        return self.body
 
     """def find_dates_of_replies(self):
         reply_matches = re.finditer(self.reply_date_pattern, body, re.DOTALL)
@@ -57,26 +56,23 @@ class EmailClass:
         prev_match = ""
         email_chain = []
         counter = 0
+        lastEmail = False
 
-        while re.match(self.reply_date_pattern1, body, re.DOTALL) or re.match(self.reply_date_pattern2, body, re.DOTALL):
-            if re.match(self.reply_date_pattern2, body, re.DOTALL):
-                match_escaped = re.escape(re.match(self.reply_date_pattern2, body, re.DOTALL).group)
-                complete_pattern = rf"\**From:.*>*\s*{match_escaped}.*>*\s*\*To:.*>*\s*\*Subject:.*just sent you a message in Canvas\."
-                print(complete_pattern)
+        reply_date_pattern = rf"({self.sentDatePattern})|({self.normalPattern})"
+        while not lastEmail:
+            if any(item in re.search(reply_date_pattern, self.body, re.DOTALL).group() for item in ["Sent", "Date"]):
+                complete_pattern = r"\**From:.*?(Subject:.*just sent you a message in Canvas\.)"
             else:
-                complete_pattern = re.escape(re.match(self.reply_date_pattern1, body, re.DOTALL).group)
+                complete_pattern = self.normalPattern
 
             complete_match_to_remove = re.search(complete_pattern, self.body, re.DOTALL)
 
-            print(complete_match_to_remove.group())
-            if complete_match_to_remove.group() is None:
-                print("ERROR")
-                exit()
+            if not complete_match_to_remove:
+                lastEmail = True
+            complete_match_index = complete_match_to_remove.start()
+            complete_match_end = complete_match_to_remove.end()
 
-            complete_match_index = re.search(complete_pattern, self.body, re.DOTALL).start()
-            complete_match_end = re.search(complete_pattern, self.body, re.DOTALL).end()
-
-            print("Match found: ", complete_match_to_remove)
+            print("Match found: ", complete_match_to_remove.group())
             print("Start index: ", complete_match_index)
             print("End index: ", complete_match_end)
 
@@ -169,19 +165,14 @@ body = "Ok.\n\nRegards,\nAbe\n\nOn Mon, Sep 16, 2019 at 5:18 AM Brian Kane <bkan
        "<https://lms.ecornell.com/profile/communication>\n>\n>\n>\n"
 
 to_student = True
-reply_date_pattern = r"(\nOn.*?wrote:)|(\**(Date|Sent:)\**.*?(AM|PM))"
+sentDatePattern = r"\**(Date|Sent:)\**.*?(AM|PM)"
+normalPattern = r"\nOn.* ?wrote:"
 
-example_object = EmailClass(date, msg_from, to, body, to_student, reply_date_pattern)
+example_object = EmailClass(date, msg_from, to, body, to_student, sentDatePattern, normalPattern)
 example_object.encode_decode_txt()
 
 date_obj = example_object.look_for_date_in_msg()
 body = example_object.delete_quote_symbol()
-print(body)
-
-match = re.search(reply_date_pattern, body, re.DOTALL)
-if match:
-    found_match = re.search(reply_date_pattern, body, re.DOTALL).group()
-
 
 email_info_dict = {'to_student': to_student}
 email_info_dict.update({'Date': date_obj})
