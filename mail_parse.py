@@ -5,6 +5,195 @@ import re
 import quopri
 
 
+class EmailClass:
+    def __init__(self, date, body, to_student, sentDatePattern, normalPattern):
+        self.date = date
+        self.body = body
+        self.to_student = to_student
+        self.sentDatePattern = sentDatePattern
+        self.normalPattern = normalPattern
+
+    def __str__(self):
+        return f"example string representation of EmailClass is {self.date} ({self.age})"
+
+    def encode_decode_txt(self):
+        try:
+            quopri.decodestring(self.body)
+        except Exception:
+            pass
+        try:
+            self.body.encode('ascii', 'ignore').decode('utf-8')
+        except Exception:
+            pass
+
+    def look_for_date_in_msg(self):
+        if type(self.date) == str:
+            match_date_str = re.search(r'\d{1,2}\s[A-Za-z]{3}\s\d{4}\s\d{2}:\d{2}:\d{2}\s[+-]\d{4}', self.date)
+
+            date_format = '%d %b %Y %H:%M:%S %z'
+            self.date = datetime.strptime(match_date_str.group(), date_format)
+        return self.date
+
+    def delete_quote_symbol(self):
+        # delete all quote histroy patterns in all of the body.
+
+        # \n(?:(?:>\s)*)
+        self.body = self.body.replace("\n> ", "\n")
+        self.body = self.body.replace("\n>", "\n")
+
+        show_quoted_text_str = re.search(r"show quoted text <(?s:).*?_>", self.body, re.IGNORECASE)
+        if show_quoted_text_str:
+            self.body = re.sub(r"show quoted text <(?s:).*?_>", '', self.body)
+        return self.body
+
+    """def find_dates_of_replies(self):
+        reply_matches = re.finditer(self.reply_date_pattern, body, re.DOTALL)
+        match_group = [match.group().encode('ascii', 'ignore').decode('utf-8') for match in reply_matches]
+        return match_group
+    """
+    def find_who_from(self, prev_match, prof_name_and_email_list):
+        if any(item in prev_match for item in ["Sent:", "Date:"]):
+            who_from = re.search(r"(?<=From:).*?(?=\n*>*\s*\**Sent:.*?)", prev_match).group()
+            who_from = who_from.replace("*", "")
+        else:
+            prev_match = prev_match.replace(" wrote:", "")
+            who_from = re.search(r"(?<=AM|PM)(?s:).*", prev_match).group()
+
+        name_sign_offs = who_from.split()
+        if any(item in who_from for item in prof_name_and_email_list):
+            email_header = 'Professor'
+        else:
+            email_header = 'Student'
+            # only save up to second last element. last element = email.
+            # pretend there are no suffixes. but there are suffixes. so..yeah.
+
+        return name_sign_offs, email_header
+
+    def remove_sign_offs(self, part_of_reply, name_sign_offs, email_header, email_address):
+        suffix_list = ["I", "II", "III", "IV", "Jr.", "Sr."]
+        while len(name_sign_offs) > 0:
+            if any(item in name_sign_offs[-1] for item in suffix_list):
+                # concatenate second to last element + suffix
+                # so when removing the suffix it won't remove things like
+                # "Part III" to "Part " in the email
+                suffix = name_sign_offs.pop(-1)
+                name_sign_offs[-1] = name_sign_offs[-1] + f" {suffix}"
+
+            name_to_remove = ' '.join(name_sign_offs)
+            potential_sign_off_str = f"\n{name_to_remove}"
+            match = re.search(potential_sign_off_str, part_of_reply, re.IGNORECASE)
+            if match:
+                # if sender repeats their own name after a newline, delete it. most likely signature.
+                # having this is nice because sometimes someone's sign off looks like this:
+                # Brian Johnson
+                # PhD at Stanford University
+                # by specifically looking for the name during sign off i can remove everything that comes after
+                part_of_reply = part_of_reply[:match.start() - 1]
+
+            # now remove all the names present in the email.
+            part_of_reply = re.sub(name_to_remove, "", part_of_reply)
+            name_sign_offs.pop(-1)
+
+        if email_address:
+            if type(email_address) == str:
+                email_address = [email_address]
+
+            for element in email_address:
+                part_of_reply = re.sub(element, "", part_of_reply)
+                element = re.sub(r">|<", "", element)
+                part_of_reply = re.sub(element, "", part_of_reply)
+
+        hibye_list = ["hi", "hello",
+                      "thanks", "regards", "my best",
+                      "best", "dear",
+                      "mr", "prof", "professor", "sir",
+                      r"--\b", r"\.", ",", r"Hi[,-]"]
+
+        for _ in hibye_list:
+            # find and remove the greeting or sign off
+            part_of_reply = re.sub(_, '', part_of_reply, flags=re.IGNORECASE)
+
+        trailing_deletions = ["Sent from my", "[image: ", "You can reply to this message",
+                              "The contents of this email are"]
+
+        # just to make sure all the trailing things have been deleted, if there was no name sign off.
+        for one_trailing in trailing_deletions:
+            one_trailing = re.escape(one_trailing)
+            match = re.search(one_trailing, part_of_reply, re.IGNORECASE)
+            if match:
+                # print("found trailing messages/links from Canvas to delete. Deleting...")
+                part_of_reply = part_of_reply[:match.start() - 1]
+
+        part_of_reply = f"{email_header}: {part_of_reply}"
+        part_of_reply = re.sub(r'\n+', '\n', part_of_reply)
+        part_of_reply.rstrip()
+        return part_of_reply
+
+    def filter_for_reply_dates(self, email_info_dict, recipient, prof_email):
+        prev_match = ""
+        email_header = ""
+        email_chain = []
+        counter = 0
+        lastEmail = False
+        prof_name_and_email_list = ["abe", "abraham", "kang", "akang@ecornell.com", "ak16@cornell.edu"]
+
+        reply_date_pattern = rf"({self.sentDatePattern})|({self.normalPattern})"
+        while not lastEmail:
+            if re.search(reply_date_pattern, self.body, re.DOTALL):
+                if any(item in re.search(reply_date_pattern, self.body, re.DOTALL).group() for item in ["Sent", "Date"]):
+                    complete_pattern = r"\**From:.*?(Subject:.*just sent you a message in Canvas\.)"
+                else:
+                    complete_pattern = self.normalPattern
+
+                complete_match_to_remove = re.search(complete_pattern, self.body, re.DOTALL)
+
+                complete_match_index = complete_match_to_remove.start()
+                complete_match_end = complete_match_to_remove.end()
+
+                # print("Match found: ", complete_match_to_remove.group())
+                # print("Start index: ", complete_match_index)
+                # print("End index: ", complete_match_end)
+
+                one_email = self.body[:complete_match_index - 1]
+                # print("one email is the email BEFORE the matched reply format")
+                self.body = self.body[complete_match_end + 1:]
+
+                # counter == 0 it is still at the most top/recent email, before the quote history.
+                # for the most recent email, find who wrote it based on who sent it using to_student.
+                if counter == 0:
+                    # if to_student is True, it means email was sent from professor to student.
+                    if email_info_dict['to_student']:
+                        email_header = 'Professor'
+                        name_sign_offs = ['Abe', 'Abraham', 'Kang']
+                        email_address = prof_email
+                    else:
+                        email_header = 'Student'
+                        name_sign_offs = recipient.split()
+                        email_address = None
+                        # in real parser, make sure to check for suffixes.
+
+                # otherwise find who wrote the email based on the reply_matches pattern, and extract the name
+                # from that. why was i trying to find the regex match for the exact name???? i spent so much
+                # time for no reason just check whether professor's name/email is in the match_group[counter]
+                # email_header = re.search(r"(?<=AM|PM)(?s).*(?=\s*<(?s).*?wrote:)", match_group[counter])
+                elif counter > 0:
+                    name_sign_offs, email_header,  = self.find_who_from(prev_match, prof_name_and_email_list)
+                    email_address = name_sign_offs.pop(-1)
+                one_email = self.remove_sign_offs(one_email, name_sign_offs, email_header, email_address)
+                counter += 1
+
+                email_chain.append(one_email)
+
+                prev_match = complete_match_to_remove.group()
+
+            elif not re.search(reply_date_pattern, self.body, re.DOTALL):
+                name_sign_offs, email_header = self.find_who_from(prev_match, prof_name_and_email_list)
+                lastEmail = self.remove_sign_offs(self.body, name_sign_offs, email_header)
+
+                email_chain.append(lastEmail)
+        return email_chain
+
+
 def getcharsets(msg):
     charsets = set({})
     for c in msg.get_charsets():
@@ -194,6 +383,9 @@ def parse_box(mbox_file):
 
     print("Passed parsing body")
     dialogue_style_email_list = []
+    sentDatePattern = r"\**(Date|Sent:)\**.*?(AM|PM)"
+    normalPattern = r"\nOn.* ?wrote:"
+
     for email_subject_key in emails:
         # retrieve the value of the key 'subject' from each dictionary
         # group_email_list is a list of dictionaries containing date, to, from, body information of emails
@@ -234,42 +426,14 @@ def parse_box(mbox_file):
 
                 # retrieve body
                 body = email_info_dict['Body']
-
-                hibye_list = ["hi", "hello",
-                              "thanks", "regards", "my best",
-                              "best", "dear",
-                              "mr", "prof", "professor", "sir"]
-
-                ls_recipient = email_info_dict['recipient'].split()
-                suffix_list = ["I", "II", "III", "IV", "Jr.", "Sr."]
-                if any(item in ls_recipient[-1] for item in suffix_list):
-                    # concatenate second to last element + suffix
-                    # so when removing the suffix it won't remove things like
-                    # "Part III" to "Part " in the email
-                    suffix = ls_recipient.pop(-1)
-                    for element in ls_recipient:
-                        element_concat_suffix = element + " " + suffix
-                        ls_recipient.append(element_concat_suffix)
-
-
-                hibye_list = [rf"\b{_}\b" for _ in hibye_list]
-                hibye_list.extend([r"--\b", r"(\n+|\s+)(\.|,)", r"Hi[,-]"])
-
-                # greet_pattern = re.compile("|".join(new_hibye_list), re.IGNORECASE)
-                # no_greet_body = greet_pattern.sub('', body)
-                # print(no_greet_body)
-
-                # above doesn't work. since it does it concurrently, it doesnt delete the " . " that's left
-                # after removing "mr". so i have to do it in a loop. so i do that below.
-
-                for _ in hibye_list:
-                    # find and remove the greeting or sign off
-                    print(f"filtering for {_}")
-
-                    body = re.sub(_, '', body, flags=re.IGNORECASE)
-                print(body)
-
-                print("email body is removed of greetings")
+                date_obj = email_info_dict['Date']
+                to_student = email_info_dict['to_student']
+                recipient = email_info_dict['recipient']
+                
+                example_object = EmailClass(date_obj, body, to_student, sentDatePattern, normalPattern)
+                example_object.encode_decode_txt()
+                body = example_object.delete_quote_symbol()
+                email_chain = example_object.filter_for_reply_dates(email_info_dict, recipient, prof_email)
 
                 # look for the same subject line in the subject line list
                 # if it doesn;t exist, save the subject line in the list
@@ -279,79 +443,6 @@ def parse_box(mbox_file):
                 # if new line starts with "[image: "
                 # remove that and everything after
 
-                # turn all multi-spaces into 1 space and remove trailing spaces.
-                # ' '.join(body.split())
-
-                # both patterns exist in mbox file (most likely some kind of external email quote or that the mbox format
-                # was updated at some point
-                # On Sun, Jan 3, 2021 at 5:44 PM [prev sender's name] <notifications@instructure.com>\nwrote:
-                # On Sun, Jan 3, 2021, 5:44 PM [prev sender's name] <notifications@instructure.com>\nwrote:
-                # .*? (question mark important, otherwise it will match everything starting from "On x date" and on
-                # ?s meaning line breaks like \n is also included
-                # without indexing the pattern it becomes an error. index the 2nd pattern as \2, 3rd as \3, and so forth
-                # when using the pipe | operand with regex. python regex is stupid and so when the pattern gets processed,
-                # regex sees it as one whole operation. so the 2nd possible pattern still refers to \1
-                reply_date_pattern = r"On [A-Za-z]{3}, [A-Za-z]{3} \d{1,2}, \d{4},* (?:at)? \d{1,2}:\d{2} (?:AM|PM)(?s).*\s*(?s).*?\bwrote\b:|(?:Date|Sent): \b\w+\b, \b\w+\b\s\d{1,2},\s\d{4},*\s\d{1,2}:\d{2}\s(?:AM|PM)"
-
-                # re.compile("|".join(rep_list), re.IGNORECASE)
-
-                # returns list of all the indices it finds that pattern in the body, aka the quoted prev emails
-                # email_header = re.search(r"(?<=AM|PM)(?s).*(?=\s*<(?s).*?wrote:)", match_group[counter])
-
-                reply_matches = re.finditer(reply_date_pattern, body, re.DOTALL)
-                print("got this far")
-
-                match_group = [match.group().encode('ascii', 'ignore').decode('utf-8') for match in reply_matches]
-
-                # it doesn't have replies, ie it's just one message
-                if not match_group:
-                    # not worth trying to figure it out lmao
-                    print("no reply matches found")
-                    pass
-
-                elif match_group:
-                    counter = 0
-
-                    print("quoted email history found in email. Processing:")
-                    print(match_group)
-
-                    email_chain = []
-                    one_email = body
-                    notSentOrDate = True
-                    # beginning_deletions = [r"show quoted text (?s).*>"]
-                    while counter < len(match_group):
-                        if counter > 0:
-                            # i dont want to delete code that maybe is using the ">" expression, so im being specific
-                            quote_greater_than_sign = "\n" + ("> " * counter)
-
-                            # delete the longer > > sequence first so its less of a headache
-                            show_quoted_text_str = re.search(r"show quoted text <(?s).*?_>", one_email, re.IGNORECASE)
-                            if show_quoted_text_str:
-                                print("found show quoted texted message in email. removing:")
-                                one_email = re.sub(r"show quoted text <(?s).*?_>", '', one_email)
-                                print(one_email)
-                                # add one more > and then delete those
-                                extra_quote_string = quote_greater_than_sign + "> "
-                                if extra_quote_string in one_email:
-                                    print("found extra >. removing")
-                                    one_email.replace(extra_quote_string, "")
-
-                            # making sure to remove all \n>.
-                            # sometimes quoted text history, for every previous email, adds an extra "> ". then sometimes
-                            # it doesnt, especially if the reply date format is the "Sent: " or "Date: " type. so just
-                            # to be extra sure, remove all quotes with this loop, without removing a usage of the > sign
-                            # that isn't a quoted text mark, by making sure there is always a newline in front.
-                            # if the > sign is used in a student's code, it wouldn't get removed.
-                            quote_counter_temp = counter
-                            while quote_counter_temp != 0:
-                                quote_greater_than_sign = "\n" + ("> " * quote_counter_temp)
-                                if quote_greater_than_sign in one_email:
-                                    print("found > quoted text symbols. removing")
-                                    one_email.replace(quote_greater_than_sign, "")
-                                    print("removed!")
-                                quote_counter_temp -= 1
-
-                            print("REMOVED QUOTED SYMBOLS:\n\n", one_email, "\n\nEND OF EMAIL")
 
                         if ", at " in match_group[counter]:
                             reply_date_format = 'On %a, %b %d, %Y, at %I:%M %p'
