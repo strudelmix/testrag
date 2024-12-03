@@ -52,90 +52,112 @@ class EmailClass:
         match_group = [match.group().encode('ascii', 'ignore').decode('utf-8') for match in reply_matches]
         return match_group
     """
+    def find_who_from(self, prev_match, prof_name_and_email_list):
+        if any(item in prev_match for item in ["Sent:", "Date:"]):
+            who_from = re.search(r"(?<=From:).*?(?=\n*>*\s*\**Sent:.*?)", prev_match).group()
+            who_from = who_from.replace("*", "")
+        else:
+            prev_match = prev_match.replace(" wrote:", "")
+            who_from = re.search(r"(?<=AM|PM)(?s:).*", prev_match).group()
+
+        name_sign_offs = who_from.split()[:-1]
+
+        if any(item in who_from for item in prof_name_and_email_list):
+            email_header = 'Professor'
+        else:
+            email_header = 'Student'
+            # only save up to second last element. last element = email.
+            # pretend there are no suffixes. but there are suffixes. so..yeah.
+
+        return name_sign_offs, email_header
+
+    def remove_sign_offs(self, part_of_reply, name_sign_offs, email_header):
+        for one_name in name_sign_offs:
+            potential_sign_off_str = f"\n{one_name}"
+            # if sender repeats their own name after a newline, delete it. most likely signature.
+            match = re.search(potential_sign_off_str, part_of_reply, re.IGNORECASE)
+            if match:
+                part_of_reply = part_of_reply[:match.start() - 1]
+                # print('removed potential sign off')
+
+        trailing_deletions = ["Sent from my", "[image: ", "You can reply to this message",
+                              "The contents of this email are the property of PNC. If it was not "
+                              "addressed to you, you have no legal right to read it."]
+        # after the loop body has been removed down to the first email in the quoted reply history
+        for one_trailing in trailing_deletions:
+            one_trailing = re.escape(one_trailing)
+            match = re.search(one_trailing, part_of_reply, re.IGNORECASE)
+            if match:
+                # print("found trailing messages/links from Canvas to delete. Deleting...")
+                part_of_reply = part_of_reply[:match.start() - 1]
+
+        part_of_reply = f"{email_header}: {part_of_reply}"
+        part_of_reply = re.sub(r'\n+', '\n', part_of_reply)
+        part_of_reply.rstrip()
+        return part_of_reply
+
     def filter_for_reply_dates(self):
         prev_match = ""
+        email_header = ""
         email_chain = []
         counter = 0
         lastEmail = False
 
         reply_date_pattern = rf"({self.sentDatePattern})|({self.normalPattern})"
         while not lastEmail:
-            if any(item in re.search(reply_date_pattern, self.body, re.DOTALL).group() for item in ["Sent", "Date"]):
-                complete_pattern = r"\**From:.*?(Subject:.*just sent you a message in Canvas\.)"
-            else:
-                complete_pattern = self.normalPattern
-
-            complete_match_to_remove = re.search(complete_pattern, self.body, re.DOTALL)
-
-            if not complete_match_to_remove:
-                lastEmail = True
-            complete_match_index = complete_match_to_remove.start()
-            complete_match_end = complete_match_to_remove.end()
-
-            print("Match found: ", complete_match_to_remove.group())
-            print("Start index: ", complete_match_index)
-            print("End index: ", complete_match_end)
-
-            one_email = self.body[:complete_match_index - 1]
-            print("one email is the email BEFORE the matched reply format")
-            self.body = self.body[complete_match_end + 1:]
-
-            # counter == 0 it is still at the most top/recent email, before the quote history.
-            # for the most recent email, find who wrote it based on who sent it using to_student.
-            if counter == 0:
-                # if to_student is True, it means email was sent from professor to student.
-                if email_info_dict['to_student']:
-                    email_header = 'Professor'
-                    name_sign_offs = ['Abe', 'Abraham', 'Kang']
+            if re.search(reply_date_pattern, self.body, re.DOTALL):
+                if any(item in re.search(reply_date_pattern, self.body, re.DOTALL).group() for item in ["Sent", "Date"]):
+                    complete_pattern = r"\**From:.*?(Subject:.*just sent you a message in Canvas\.)"
                 else:
-                    email_header = 'Student'
-                    name_sign_offs = recipient.split()
-                    # in real parser, make sure to check for suffixes.
+                    complete_pattern = self.normalPattern
 
-            # otherwise find who wrote the email based on the reply_matches pattern, and extract the name
-            # from that. why was i trying to find the regex match for the exact name???? i spent so much
-            # time for no reason just check whether professor's name/email is in the match_group[counter]
-            # email_header = re.search(r"(?<=AM|PM)(?s).*(?=\s*<(?s).*?wrote:)", match_group[counter])
+                complete_match_to_remove = re.search(complete_pattern, self.body, re.DOTALL)
 
-            elif counter > 0:
-                if any(item in prev_match for item in ["Sent:", "Date:"]):
-                    who_from = re.search(r"(?<=From:).*?(?=\n*>*\s*\*Sent:.*?)", prev_match).group()
+                complete_match_index = complete_match_to_remove.start()
+                complete_match_end = complete_match_to_remove.end()
 
-                else:
-                    prev_match = prev_match.replace(" wrote:", "")
-                    who_from = re.search(r"(?<=AM|PM)(?s).*", prev_match).group()
+                # print("Match found: ", complete_match_to_remove.group())
+                # print("Start index: ", complete_match_index)
+                # print("End index: ", complete_match_end)
 
-                name_sign_offs = who_from.split()[:-2]
+                one_email = self.body[:complete_match_index - 1]
+                # print("one email is the email BEFORE the matched reply format")
+                self.body = self.body[complete_match_end + 1:]
 
-                if any(item in who_from for item in prof_name_and_email_list):
-                    email_header = 'Professor'
-                else:
-                    email_header = 'Student'
-                    # only save up to second last element. last element = email.
-                    # pretend there are no suffixes. but there are suffixes. so..yeah.
+                # counter == 0 it is still at the most top/recent email, before the quote history.
+                # for the most recent email, find who wrote it based on who sent it using to_student.
+                if counter == 0:
+                    # if to_student is True, it means email was sent from professor to student.
+                    if email_info_dict['to_student']:
+                        email_header = 'Professor'
+                        name_sign_offs = ['Abe', 'Abraham', 'Kang']
+                    else:
+                        email_header = 'Student'
+                        name_sign_offs = recipient.split()
+                        # in real parser, make sure to check for suffixes.
 
-            for one_name in name_sign_offs:
-                potential_sign_off_str = f"\n{one_name}"
-                # if sender repeats their own name after a newline, delete it. most likely signature.
-                if potential_sign_off_str in one_email:
-                    index_sign_off = one_email.index(potential_sign_off_str)
-                    one_email = one_email[:index_sign_off - 1]
-                    print('removed potential sign off')
+                # otherwise find who wrote the email based on the reply_matches pattern, and extract the name
+                # from that. why was i trying to find the regex match for the exact name???? i spent so much
+                # time for no reason just check whether professor's name/email is in the match_group[counter]
+                # email_header = re.search(r"(?<=AM|PM)(?s).*(?=\s*<(?s).*?wrote:)", match_group[counter])
+                elif counter > 0:
+                    name_sign_offs, email_header,  = self.find_who_from(prev_match, prof_name_and_email_list)
 
-            trailing_deletions = ["Sent from my", "[image: ", "You can reply to this message",
-                                  "The contents of this email are the property of PNC. If it was not "
-                                  "addressed to you, you have no legal right to read it."]
-            # after the loop body has been removed down to the first email in the quoted reply history
-            for one_trailing in trailing_deletions:
-                if one_trailing in one_email:
-                    print("found trailing messages/links from Canvas to delete. Deleting...")
-                    one_email = one_email.split(one_trailing)[0]
+                one_email = self.remove_sign_offs(one_email, name_sign_offs, email_header)
+                counter += 1
 
-            one_email = f"{email_header}:\n{one_email}"
-            email_chain.append(one_email)
+                email_chain.append(one_email)
 
-            prev_match = complete_match_to_remove.group()
-            counter += 1
+                prev_match = complete_match_to_remove.group()
+
+            elif not re.search(reply_date_pattern, self.body, re.DOTALL):
+                name_sign_offs, email_header = self.find_who_from(prev_match, prof_name_and_email_list)
+                lastEmail = self.remove_sign_offs(self.body, name_sign_offs, email_header)
+
+                email_chain.append(lastEmail)
+
+
+
         return email_chain
 
 
@@ -178,7 +200,7 @@ email_info_dict = {'to_student': to_student}
 email_info_dict.update({'Date': date_obj})
 
 recipient = to
-prof_name_and_email_list = ["abe", "abraham", "kang", "akang@ecornell.com", "ak16@cornell.edu"]
+prof_name_and_email_list = ["Abe", "Abraham", "Kang", "akang@ecornell.com", "ak16@cornell.edu"]
 
 
 # define match_group after deleting quotes, so that match_group also no longer has quotes and it matches its duplicate.`
