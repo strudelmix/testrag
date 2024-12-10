@@ -25,33 +25,49 @@ class EmailClass:
             pass
 
     def look_for_date_in_msg(self, prev_date_pattern):
-        reply_date_str = re.search(prev_date_pattern, self.body, re.DOTALL)
-        if reply_date_str:
-            reply_date_str_group = reply_date_str.group()
-            if ", at " in reply_date_str_group:
-                cut_off = re.search(r"AM|PM", reply_date_str_group).end()
-                reply_date_str_group = reply_date_str_group[:cut_off]
-                reply_date_format = 'On %a, %b %d, %Y, at %I:%M %p'
-            elif " at " in reply_date_str_group:
-                cut_off = re.search(r"AM|PM", reply_date_str_group).end()
-                reply_date_str_group = reply_date_str_group[:cut_off]
-                reply_date_format = 'On %a, %b %d, %Y at %I:%M %p'
-            elif "Sent:" in reply_date_str_group:
+        # prev_date_pattern is the EXACT match of the reply date text in the email. ie, "On x x day, x .com wrote:"
+        # also is From: to Subject line end.
+        match_all = re.search(r"(?:Sent|Date).*", prev_date_pattern) # if u do dotall itll match w everything after Sent|Date
+        reply_date_format = ""
+        remove_char_prev_date = ""
+
+        if match_all:
+            match_once = match_all.group(0)
+            if any(item in match_once for item in 'Sent'):
                 reply_date_format = 'Sent: %A, %B %d, %Y %I:%M %p'
-            elif "Date:" in reply_date_str_group:
+                remove_char_prev_date = match_once
+            elif any(item in match_once for item in 'Date'):
                 reply_date_format = 'Date: %A, %b %d, %Y, %I:%M %p'
-            else:
-                cut_off = re.search(r"AM|PM", reply_date_str_group).end()
-                reply_date_str_group = reply_date_str_group[:cut_off]
-                reply_date_format = 'On %a, %b %d, %Y, %I:%M %p'
-            print(reply_date_str_group)
-            reply_obj = datetime.strptime(reply_date_str_group, reply_date_format)
-            # so that while iterating through the for loop, if i come across emails that have these
-            # exact dates, i don't process them again. and since i already sorted the list of emails
-            # based on the most recent dates, i'll be processing the ones that are the most recent
-            # first.
+                remove_char_prev_date = match_once
+            remove_char_prev_date = re.sub(r"\s+", " ", remove_char_prev_date, re.DOTALL)
+            remove_char_prev_date = re.sub(r"\n", "", remove_char_prev_date, re.DOTALL)
+            remove_char_prev_date = remove_char_prev_date.strip()
+
+        elif "wrote:" in prev_date_pattern:
+            # only the pattern that goes ", at " has this specific pattern that does not require a "%a.
+            # excluding Sent or Date formatting style.
+            # the rest is like '%a %b %d %Y %I:%M %p' once commas and other words are stripped, but we are also removing
+            # %a part as well at the end when matching only starting at %b using regex
+            # make everything same as this.
+
+            stripping_pattern = prev_date_pattern.replace(",", "").replace("at", "").replace("On", "").replace("wrote:", "")
+            stripping_pattern = re.sub(r"\s+", " ", stripping_pattern, re.DOTALL)
+            stripping_pattern = re.sub(r"\n", "", stripping_pattern, re.DOTALL)
+            stripping_pattern = stripping_pattern.strip()
+            match = re.search(r"[A-Za-z]{3} \d{1,2} \d{4} \d{1,2}:\d{2} (?:AM|PM)", stripping_pattern)
+            if match:
+                remove_char_prev_date = match.group()
+            reply_date_format = '%b %d %Y %I:%M %p'
+
         else:
-            reply_obj = None
+            print("something went wrong, fix it")
+            exit()
+
+        reply_obj = datetime.strptime(remove_char_prev_date, reply_date_format)
+        # so that while iterating through the for loop, if i come across emails that have these
+        # exact dates, i don't process them again. and since i already sorted the list of emails
+        # based on the most recent dates, i'll be processing the ones that are the most recent
+        # first.
         return reply_obj
 
     def delete_quote_symbol(self):
@@ -72,15 +88,18 @@ class EmailClass:
     """
     def find_who_from(self, prev_match, prof_name_and_email_list):
         who_from = ""
-        print(prev_match)
-        if any(item in prev_match for item in ["Sent:", "Date:"]):
-            who_from = re.search(r"From:.*?\n(?:Date:|Sent:)", prev_match, re.DOTALL).group()
-            who_from = who_from.replace("From:", "").replace("\nDate:", "").replace("*", "")
-        elif any(item in prev_match for item in ["wrote:"]):
-            cut_off = prev_match.find("wrote:")
-            start_off = re.search(r"(?:AM|PM)", prev_match).end()
-            who_from = who_from[start_off + 1:cut_off - 1]
-        print(who_from)
+        # prev_match is the previous reply format EXACTLY. ie. "On x x day from x@gmail.com wrote:" or the other version.
+        if prev_match:
+            if any(item in prev_match for item in ["Sent", "Date"]):
+                # check who sent the email, so that i can use it to create the header of "Student" or "Professor",
+                who_from = re.search(r"From:.*?\n(?:Date:|Sent:)", prev_match, re.DOTALL).group()
+                who_from = who_from.replace("From:", "").replace("\nDate:", "").replace("\nSent:", "").replace("*", "")
+            elif any(item in prev_match for item in ["wrote:"]):
+                who_from_all = re.findall(r"(?:AM|PM),*(.+?)wrote:", prev_match, re.DOTALL)
+                who_from = who_from_all[0]
+            else:
+                print("i really screwed up somewhere")
+                exit(5)
 
         name_sign_offs = who_from.split()
         print(name_sign_offs)
@@ -96,14 +115,18 @@ class EmailClass:
     def remove_sign_offs(self, part_of_reply, name_sign_offs, email_header, email_address):
         suffix_list = ["I", "II", "III", "IV", "Jr.", "Sr."]
         while len(name_sign_offs) > 0:
-            if any(item in name_sign_offs[-1] for item in suffix_list):
+            if any(item in name_sign_offs for item in suffix_list):
                 # concatenate second to last element + suffix
                 # so when removing the suffix it won't remove things like
                 # "Part III" to "Part " in the email
                 suffix = name_sign_offs.pop(-1)
-                name_sign_offs[-1] = name_sign_offs[-1] + f" {suffix}"
+
+                concat_suffix_to_last = name_sign_offs[-1] + f" {suffix}"
+                name_sign_offs[-1] = concat_suffix_to_last
 
             name_to_remove = ' '.join(name_sign_offs)
+            print(name_to_remove)
+
             potential_sign_off_str = f"\n{name_to_remove}"
             match = re.search(potential_sign_off_str, part_of_reply, re.IGNORECASE)
             if match:
@@ -137,15 +160,14 @@ class EmailClass:
             # find and remove the greeting or sign off
             part_of_reply = re.sub(_, '', part_of_reply, flags=re.IGNORECASE)
 
-        trailing_deletions = ["Sent from my", "[image: ", "You can reply to this message",
+        trailing_deletions = ["Sent from my", r"\[image: ", "You can reply to this message",
                               "The contents of this email are"]
 
         # just to make sure all the trailing things have been deleted, if there was no name sign off.
         for one_trailing in trailing_deletions:
-            one_trailing = re.escape(one_trailing)
             match = re.search(one_trailing, part_of_reply, re.IGNORECASE)
             if match:
-                # print("found trailing messages/links from Canvas to delete. Deleting...")
+                # ("found trailing messages/links from Canvas to delete. Deleting...")
                 part_of_reply = part_of_reply[:match.start() - 1]
 
         part_of_reply = f"{email_header}: {part_of_reply}"
@@ -159,32 +181,38 @@ class EmailClass:
         email_chain = []
         counter = 0
         lastEmail = False
+        subject_index = ""
+        from_index = ""
         prof_name_and_email_list = ["abe", "abraham", "kang", "akang@ecornell.com", "ak16@cornell.edu"]
 
         reply_date_pattern = rf"({self.sentDatePattern})|({self.normalPattern})"
+
         while not lastEmail:
             match_all = re.findall(reply_date_pattern, self.body, re.DOTALL)
+            # first find all the reply date patterns in the body.
             if match_all:
                 match_once = match_all[0]
-                if any(item in match_once for item in ["Sent", "Date"]):
-                    from_index = self.body.find('From: ')
-                    subject_index = self.body.find('just sent you a message in Canvas.')
-                    len_sub_index = len('just sent you a message in Canvas.')
-                    first_instance_complete = self.body[from_index:subject_index + len_sub_index]
-                else:
-                    complete_pattern = re.search(self.normalPattern, self.body, re.DOTALL).group()
-                    from_index = complete_pattern.find("On ")
-                    subject_index = complete_pattern.find("wrote:")
-                    len_sub_index = len("wrote:")
-                    first_instance_complete = complete_pattern[from_index:subject_index + len_sub_index]
 
-                # print("Match found: ", complete_match_to_remove.group())
-                # print("Start index: ", complete_match_index)
-                # print("End index: ", complete_match_end)
+                for half_match in match_once:
+                    if any(item in half_match for item in ["Sent", "Date"]):
+                        from_index = self.body.find('From:')
+                        subject_index = self.body.find('just sent you a message in Canvas.')
+                        len_sub_index = len('just sent you a message in Canvas.')
+                        subject_index_end = subject_index + len_sub_index
+                        next_date_format = self.body[from_index:subject_index_end]
+                    elif any(item in half_match for item in "wrote:"):
+                        complete_pattern = re.search(self.normalPattern, self.body, re.DOTALL)
+                        if complete_pattern:
+                            from_index = complete_pattern.start()
+                            subject_index_end = complete_pattern.end()
+                        next_date_format = self.body[from_index:subject_index_end]
+                    # if found, then find the first reply date pattern and the index for it.
+                    # find the index starting from "On" to "wrote:" Or "From:" to the end of the subject line.
 
-                one_email = self.body[:subject_index + len_sub_index - 1]
-                # print("one email is the email BEFORE the matched reply format")
-                self.body = self.body[from_index + 1:]
+                # one email is up to right before the reply date format that is the header for the next quoted email.
+                one_email = self.body[:from_index - 1]
+                # ("one email is the email BEFORE the matched reply format")
+                self.body = self.body[subject_index_end:]
 
                 # counter == 0 it is still at the most top/recent email, before the quote history.
                 # for the most recent email, find who wrote it based on who sent it using to_student.
@@ -197,28 +225,25 @@ class EmailClass:
                     else:
                         email_header = 'Student'
                         name_sign_offs = recipient.split()
-                        email_address = None
+                        email_address = name_sign_offs.pop(-1)
                         # in real parser, make sure to check for suffixes.
-
-                # otherwise find who wrote the email based on the reply_matches pattern, and extract the name
-                # from that. why was i trying to find the regex match for the exact name???? i spent so much
-                # time for no reason just check whether professor's name/email is in the match_group[counter]
-                # email_header = re.search(r"(?<=AM|PM)(?s).*(?=\s*<(?s).*?wrote:)", match_group[counter])
                 else:
                     name_sign_offs, email_header,  = self.find_who_from(prev_match, prof_name_and_email_list)
                     email_address = name_sign_offs.pop(-1)
+
+                print(f"name sign offs is {name_sign_offs}")
                 one_email = self.remove_sign_offs(one_email, name_sign_offs, email_header, email_address)
                 counter += 1
 
                 email_chain.append(one_email)
-
-                prev_match = first_instance_complete
+                prev_match = next_date_format
 
             elif not re.search(reply_date_pattern, self.body, re.DOTALL):
                 name_sign_offs, email_header = self.find_who_from(prev_match, prof_name_and_email_list)
                 lastEmail = self.remove_sign_offs(self.body, name_sign_offs, email_header, email_address)
 
                 email_chain.append(lastEmail)
+                lastEmail = True
 
         return email_chain, prev_match
 
@@ -229,15 +254,6 @@ def getcharsets(msg):
         if c is not None:
             charsets.update([c])
     return charsets
-
-
-# def handleerror(errmsg, emailmsg, cs):
-# print()
-# print(errmsg)
-# print("This error occurred while decoding with ", cs, " charset.")
-# print("These charsets were found in the one email.", getcharsets(emailmsg))
-# print("This is the subject:", emailmsg['subject'])
-# p rint("This is the sender:", emailmsg['From'])
 
 
 def get_message_body(msg):
@@ -465,6 +481,7 @@ def create_filtered_email_dialogue(prof_email):
                     # first two elements are name of sender
 
                     # retrieve body
+                    print("not stuck")
                     body = email_info_dict['Body']
                     to_student = email_info_dict['to_student']
                     recipient = email_info_dict['recipient']
@@ -472,11 +489,14 @@ def create_filtered_email_dialogue(prof_email):
                     example_object = EmailClass(date_obj, body, to_student, sentDatePattern, normalPattern)
                     example_object.encode_decode_txt()
                     example_object.delete_quote_symbol()
+                    print("not stuck 2")
                     email_chain, prev_date_pattern = example_object.filter_for_reply_dates(email_info_dict, recipient, prof_email)
+                    print("not stuck3")
 
                     if prev_date_pattern:
                         reply_obj = example_object.look_for_date_in_msg(prev_date_pattern)
                         reply_dates_list.append(reply_obj)
+                        print("not stuck4")
 
                     # look for the same subject line in the subject line list
                     # if it doesn;t exist, save the subject line in the list
@@ -484,6 +504,8 @@ def create_filtered_email_dialogue(prof_email):
                     # then add up the conversations together
 
                     dialogue_style_email_list.append(email_chain)
+                    print("not stuck5")
+
 
                     # find index
                     # there are no ">" for those emails
@@ -502,7 +524,7 @@ def create_filtered_email_dialogue(prof_email):
 
 mbox_file = "Sent.mbox"
 sentDatePattern = r"\**(?:Date|Sent:)\**.*?\nTo:.*?.com"
-normalPattern = r"\nOn.* ?wrote:"
+normalPattern = r"\nOn\b [A-Za-z]{3,9}.*?wrote:"
 
 prof_email = ["akang@ecornell.com", "ak16@cornell.edu"]
 
