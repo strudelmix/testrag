@@ -67,7 +67,6 @@ class EmailClass:
             prev_date_pattern = prev_date_pattern.replace("at", "")
             prev_date_pattern = re.sub(r"\s+", " ", prev_date_pattern, re.DOTALL)
             prev_date_pattern = re.sub(r"\n", "", prev_date_pattern, re.DOTALL)
-            prev_date_pattern = prev_date_pattern.strip()
 
             match1 = re.search(r"\b[A-Za-z]{3} \d{1,2}, \d{4},* \d{1,2}:\d{1,2}", prev_date_pattern, re.DOTALL)
             if match1:
@@ -112,16 +111,6 @@ class EmailClass:
         # first.
         return reply_obj
 
-    def delete_quote_symbol(self):
-        # delete all quote histroy patterns in all of the body.
-
-        # \n(?:(?:>\s)*)
-        self.body = self.body.replace("\n> ", "\n")
-        self.body = self.body.replace("\n>", "\n")
-
-        show_quoted_text_str = re.search(r"show quoted text <(?s:).*?_>", self.body, re.IGNORECASE)
-        if show_quoted_text_str:
-            self.body = re.sub(r"show quoted text <(?s:).*?_>", '', self.body)
 
     """def find_dates_of_replies(self):
         reply_matches = re.finditer(self.reply_date_pattern, body, re.DOTALL)
@@ -237,18 +226,18 @@ class EmailClass:
                 element = re.sub(r">|<", "", element)
                 part_of_reply = re.sub(element, "", part_of_reply)
 
-        hibye_list = ["Hi", "Hello", "Abe", "Kang", "Abraham", "Good morning"
-                      "thanks", "regards", "my best",
-                      "best", "dear", "sincerely"
-                      "mr", "prof", "professor", "sir",
-                      r"--\b", r"\.", ",", r"Hi[,-]"]
+        hibye_list = [r"\bHi\b", r"\bHello\b", r"\bAbe\b", r"\bKang\b", r"\bAbraham\b", r"\bGood morning\b"
+                      "thanks", "regards", r"\bmy best", "[**EXTERNAL EMAIL**]"
+                      r"\bbest", r"\bdear", "sincerely", "Thanks"
+                      r"\bmr.", r"\bmr\b", r"\bprof\b", "professor", r"\bsir\b",
+                      r"--\b", r"\s\.\s", r"\s,\s", r"\bHi[,-]\b", r"\bAdios\b"]
 
         for _ in hibye_list:
             # find and remove the greeting or sign off
             part_of_reply = re.sub(_, '', part_of_reply, flags=re.IGNORECASE)
 
-        trailing_deletions = ["Sent from my", r"\[image: ", "You can reply to this message",
-                              "The contents of this email are"]
+        trailing_deletions = ["Sent from my", r"\[image: ", r"[cid:", "You can reply to this message", "(Facillitator)"
+                              "You can reply to ts message", "The contents of this email are", "<x-msg"]
 
         # just to make sure all the trailing things have been deleted, if there was no name sign off.
         for one_trailing in trailing_deletions:
@@ -257,9 +246,18 @@ class EmailClass:
                 # ("found trailing messages/links from Canvas to delete. Deleting...")
                 part_of_reply = part_of_reply[:match.start() - 1]
 
+        part_of_reply = re.sub(r"\n(?:> )+", '\n', part_of_reply)
+        part_of_reply = re.sub(r">>", '', part_of_reply)
+        part_of_reply = re.sub(r" >\B", '', part_of_reply)
+        part_of_reply = re.sub(r"\B>\B", '', part_of_reply)
+        part_of_reply = re.sub(r"show quoted text <(?s:).*?_>", '', part_of_reply)
+        part_of_reply = re.sub(r"show quoted text", '', part_of_reply)
+        part_of_reply = re.sub(r"\[\*\*EXTERNAL EMAIL\*\*]:", '', part_of_reply)
         part_of_reply = f"{email_header}: {part_of_reply}"
-        part_of_reply = re.sub(r'\n+', '\n', part_of_reply)
-        part_of_reply.rstrip()
+        print("\n\n\n\nTHIS")
+
+        print(part_of_reply)
+        print("THIS\n\n\n\n\n")
         return part_of_reply
 
     def filter_for_reply_dates(self, email_info_dict, recipient, prof_email):
@@ -599,7 +597,6 @@ def create_filtered_email_dialogue(prof_email):
 
                     example_object = EmailClass(date_obj, body, to_student, sentDatePattern, normalPattern)
                     example_object.encode_decode_txt()
-                    example_object.delete_quote_symbol()
                     print("not stuck 2")
                     email_chain, prev_date_pattern = example_object.filter_for_reply_dates(email_info_dict, recipient, prof_email)
                     print("not stuck3")
@@ -632,8 +629,17 @@ def create_filtered_email_dialogue(prof_email):
                     print("email has already been processed in a separate email thread. Looping to the next element...")
                     pass
 
+    filtered_dia_list = []
+    for one_dia in dialogue_style_email_list:
+        prof_reply = False
+        for element in one_dia:
+            if "Professor:" in element:
+                prof_reply = True
+        if prof_reply:
+            filtered_dia_list.append(one_dia)
+
     with open("sent_mail_2.json", "a") as outfile:
-        json.dump(dialogue_style_email_list, outfile, indent=4)
+        json.dump(filtered_dia_list, outfile, indent=4)
 
 
 mbox_file = "Sent.mbox"
