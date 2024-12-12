@@ -1,0 +1,72 @@
+import chromadb
+import ollama
+from ollama import chat
+import json
+from pydantic import BaseModel
+from typing import Literal
+import ast
+
+client = chromadb.Client()
+collection = client.create_collection(name="docs")
+
+input_vector_doc = []
+with open("sent_mail_2.json", "r") as outfile:
+    documents = json.load(outfile)
+
+for dia in documents:
+    one_input = ""
+    for response in dia:
+        response = response.replace("show quoted text", "")
+        one_input = one_input + response + "\n"
+    input_vector_doc.append(one_input)
+code_q = []
+# email_summary_prompter = f"You are a renowned chatbot assistant aiding in solving customer support tickets. A customer currently has a question which is labeled as '## Question:'. Outlined below are previously completed customer support tickets labeled '## Ticket 1:', '## Ticket 2:', and so forth. For each ticket, describe the question that the customer has, and the successful solution that solved the issue. Explain how and why this solution solved the problem, and thoroughly breakdown your rationale. Then, answer the question that the current customer has. It is crucial to your wellbeing that you only respond with factual information. If you do not understand why and how a solution solved the customer problem, do not attempt to explain the solution.\n\n## Question:\n{student_question}\n\n"
+# email_summary_prompter = f"You are a renowned chatbot assistant aiding in solving student questions. A student currently has a question which is labeled as '## Question:'. You are given a previously completed student problem labeled as '## Ticket:'. The ticket is in a dialogue format between 'Student:' and 'Professor:'. Edit the code that the student has a question about to provide a successful solution. It is crucial to your wellbeing that you only respond with factual information. If you do not understand why or how to solve the problem, do not attempt to explain the solution.\n\n## Question:\n{student_question}\n\n##Ticket: {data}"
+
+
+class YesNo(BaseModel):
+  yes_or_no_code: Literal['yes', 'no']
+  code_snippet: str | None
+
+
+
+ollama.pull('llama3')
+
+for doc in documents:
+    one_response = ""
+    for response in doc:
+        extract_code_prompt = f"Does the passage of text involve a coding question? If yes, extract all the Python code snippets found in this passage of text. The code should be extracted in its original form, without any modifications or transformations and with no commentary. If there is no code, return nothing. If there is code, return the code snippet.\n{response}"
+        find_student_question = f"You are reading student emails to a professor. Explain clearly what problem the student is stuck on. Explain the context of the problem and what specific concepts the student is struggling on. If there is no question or problem the student has, return nothing.\n{response}"
+        # generate a response combining the prompt and data we retrieved in step 2
+        output = ollama.generate(
+            model="llama3",
+            prompt=extract_code_prompt,
+            format=YesNo.model_json_schema()
+        )
+        outdict = ast.literal_eval(output['response'].replace('null', 'None').strip())
+        output2 = ollama.generate(
+            model="llama3",
+            prompt=find_student_question
+        )
+
+        to_feed = ""
+        if outdict['yes_or_no_code'] == 'yes':
+            to_feed = outdict['code_snippet']
+        else:
+            to_feed = 'No'
+
+
+        verify_extract = f"Is the passage of text a code snippet? Answer only yes or no, with no commentary. If 'no' or is empty, return No. \n{to_feed}"
+        output3 = ollama.generate(
+            model="llama3",
+            prompt=verify_extract
+        )
+
+        print(outdict)
+        print(output2['response'])
+        print(output3['response'])
+
+
+        print('done\n\n')
+
+
