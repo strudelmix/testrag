@@ -94,6 +94,7 @@ print("qa db created")
 #user_question = "\n  Subject: Code Error in Reduce Variance with Bagging(Project 2)\n\nI got an extension for the submission of my project, and l need some\nassistance debugging my last project.\nFor question one which requires alphas, each time l attempted to multiply\nthe tree with alphas to create prediction, and so l removed it, and only 2\nout of 4 test run passed.\nFor the second question, only two out of three passed, and l am not sure\nwhere the error is because the residual looks okay, but the way it is being\ncalled after the trees and weights are collected is what is still confusing.\nI went through your video, and the pseudo code, and l was able to come up\nwith the current code. Kindly suggest how this could be fixed.\n\nThanks.\n\n"
 user_question = "\r\n  Subject: knnclassifier\r\n\r\nThanks\n\r\nI am still not passing the findknn tests. Something is still off with the slicing. The test fails when it tests for \u201ctest=(type(Dg[0][0])==np.float32)\u201d.\r\n\r\nWhat I have now in the findknn code block is this:\r\n\r\ndef findknn(xTr,xTe,k):\r\n    \"\"\"\r\n    function [indices,dists]=findknn(xTr,xTe,k);\r\n\r\n    Finds the k nearest neighbors of xTe in xTr.\r\n\r\n    Input:\r\n    xTr = nxd input matrix with n row-vectors of dimensionality d\r\n    xTe = mxd input matrix with m row-vectors of dimensionality d\r\n    k = number of nearest neighbors to be found\r\n\r\n    Output:\r\n    indices = kxm matrix, where indices(i,j) is the i^th nearest neighbor of xTe(j,:)\r\n    dists = Euclidean distances to the respective nearest neighbors\r\n    \"\"\"\r\n\r\n\r\n    D=l2distance(xTe, xTr)\r\n    (m,n) = D.shape\r\n\r\n    ind = np.argsort(D,0)\r\n    dis = np.sort(D,0)\r\n\r\n    indices = ind[start_index_row_inc:end_index_row_exc,start_index_col_inc:end_index_col_exc]\r\n    dists = dis[:k,:]\r\n\r\n\r\n    return indices, dists\r\n\r\nThank you,\r\n\r\n"
 retrieved_docs = vector_store.similarity_search(user_question)
+print(user_question)
 
 print("retriever created")
 code_llm = Ollama(model="codellama")
@@ -104,7 +105,7 @@ prompt_RAG = """
     1. Use context to understand the code snippets.
     2. Ensure all the requirements in the question are met.
     3. Ensure the output code syntax is correct.
-    Below you are also given previous student inquiries on the same or similar question, as well as the code snippet they gave and potentially your response code snippet that solved their issue. Complete the current student code based on this information.
+    Below you are also given previous student inquiries on the same or similar question, as well as the code snippet they gave and potentially your response code snippet that solved their issue. After resolving the issue and providing your solution, respond with the entire updated code snippet.
     Question:
     {question}
     Context:
